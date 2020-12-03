@@ -421,6 +421,14 @@ public class GitCommitIdMojo extends AbstractMojo {
   @Parameter GitDescribeConfig gitDescribe;
 
   /**
+   *  Get version number / build number based of the last git commit in the module itself,
+   *  and not based on the last git commit of the whole git project.
+   *  Works only in JGit mode.
+   */
+  @Parameter(defaultValue = "false")
+  boolean enablePerModuleVersions;
+
+  /**
    * Minimum length of {@code 'git.commit.id.abbrev'} property. Value must be from 2 to 40
    * (inclusive), other values will result in an exception.
    *
@@ -1504,6 +1512,60 @@ public class GitCommitIdMojo extends AbstractMojo {
     for (String propertyName : propertiesToPublish.stringPropertyNames()) {
       log.info("including property '" + propertyName + "' in results");
     }
+  }
+
+  private void loadGitData(@Nonnull Properties properties) throws GitCommitIdExecutionException {
+    if (useNativeGit || useNativeGitViaCommandLine) {
+      loadGitDataWithNativeGit(properties);
+    } else {
+      loadGitDataWithJGit(properties);
+    }
+  }
+
+  private void loadGitDataWithNativeGit(@Nonnull Properties properties) throws GitCommitIdExecutionException {
+    try {
+      final File basedir = project.getBasedir().getCanonicalFile();
+
+      GitDataProvider nativeGitProvider = NativeGitProvider
+              .on(basedir, nativeGitTimeoutInMs, log)
+              .setPrefixDot(prefixDot)
+              .setAbbrevLength(abbrevLength)
+              .setDateFormat(dateFormat)
+              .setDateFormatTimeZone(dateFormatTimeZone)
+              .setGitDescribe(gitDescribe)
+              .setCommitIdGenerationMode(commitIdGenerationModeEnum)
+              .setUseBranchNameFromBuildEnvironment(useBranchNameFromBuildEnvironment)
+              .setExcludeProperties(excludeProperties)
+              .setIncludeOnlyProperties(includeOnlyProperties)
+              .setOffline(offline || settings.isOffline());
+
+      nativeGitProvider.loadGitData(evaluateOnCommit, properties);
+    } catch (IOException e) {
+      throw new GitCommitIdExecutionException(e);
+    }
+  }
+
+  private void loadGitDataWithJGit(@Nonnull Properties properties) throws GitCommitIdExecutionException {
+    String projectDirectory = null;
+    if (enablePerModuleVersions) {
+      String projectRootDir = dotGitDirectory.getAbsolutePath().substring(0, dotGitDirectory.getAbsolutePath().indexOf(".git"));
+      projectDirectory = project.getBasedir().getAbsolutePath().substring(projectRootDir.length()).replace("\\", "/");
+    }
+    GitDataProvider jGitProvider = JGitProvider
+        .on(dotGitDirectory, log)
+        .setPrefixDot(prefixDot)
+        .setAbbrevLength(abbrevLength)
+        .setDateFormat(dateFormat)
+        .setDateFormatTimeZone(dateFormatTimeZone)
+        .setGitDescribe(gitDescribe)
+        .setCommitIdGenerationMode(commitIdGenerationModeEnum)
+        .setUseBranchNameFromBuildEnvironment(useBranchNameFromBuildEnvironment)
+        .setExcludeProperties(excludeProperties)
+        .setIncludeOnlyProperties(includeOnlyProperties)
+        .setOffline(offline || settings.isOffline())
+        .setProjectDirectory(projectDirectory);
+
+    jGitProvider.loadGitData(evaluateOnCommit, properties);
   }
 
   private boolean isPomProject(@Nonnull MavenProject project) {
